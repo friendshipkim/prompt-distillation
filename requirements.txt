@@ -1,0 +1,8 @@
+numpy==1.26.2
+torch==2.1.2
+transformers==4.42.4
+wandb==0.17.2
+datasets==2.20.0
+trl==0.10.1
+peft==0.11.1
+# alignment-handbook-0.4.0.dev0
