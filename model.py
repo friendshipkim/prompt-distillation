@@ -4,9 +4,13 @@ from typing import Dict, Optional, Tuple
 
 import torch
 import torch.nn as nn
+from torch.nn import CrossEntropyLoss
+
 import transformers
 from huggingface_hub import PyTorchModelHubMixin
 from einops import rearrange
+
+from transformers.cache_utils import DynamicCache
 
 from model_utils import (
     EMBEDDING_TRANSFORM_STRATEGIES,
@@ -1116,10 +1120,14 @@ class PatchedModel(nn.Module, PyTorchModelHubMixin):
         input_ids: torch.Tensor,
         labels: torch.Tensor,
         attention_mask: torch.Tensor,
-        teacher_input_ids: Optional[torch.Tensor],
-        teacher_attention_mask: Optional[torch.Tensor],
+        # teacher_input_ids: Optional[torch.Tensor],
+        # teacher_attention_mask: Optional[torch.Tensor],
         **kwargs,
     ) -> Dict[str, torch.Tensor]:
+        
+        teacher_input_ids, input_ids = torch.chunk(input_ids, 2, dim=-1)
+        teacher_attention_mask, attention_mask = torch.chunk(attention_mask, 2, dim=-1)
+
         past_key_values = self.embed_and_project(
             teacher_input_ids=teacher_input_ids,
             teacher_attention_mask=teacher_attention_mask,
@@ -1127,19 +1135,37 @@ class PatchedModel(nn.Module, PyTorchModelHubMixin):
         )
         # past_key_values = [item*self.gate for item in past_key_values]
 
+        past_key_cache = DynamicCache()
+
+        for (layer_idx, (past_key, past_value)) in enumerate(past_key_values):
+            past_key_cache.update(past_key, past_value, layer_idx)
+
         masks = self.generate_masks(input_ids, teacher_attention_mask, attention_mask)
         if self.freeze_student:
             self.student.eval()
         outputs = self.student(
             input_ids=input_ids,
             position_ids=masks["position_ids"],
-            past_key_values=past_key_values,
+            past_key_values=past_key_cache,
             attention_mask=masks["attention_mask"],
-            gate_attention_mask=masks["gate_attention_mask"],
-            labels=labels,
+            # gate_attention_mask=masks["gate_attention_mask"],
+            # labels=labels,
             **kwargs,
         )
 
+        logits = outputs.logits.float()
+        labels = labels[..., labels.shape[1]//2:]
+        shift_logits = logits[..., :-1, :].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
+
+        # Flatten the tokens
+        loss_fct = CrossEntropyLoss()
+        shift_logits = shift_logits.view(-1, self.student.config.vocab_size)
+        shift_labels = shift_labels.view(-1)
+        # Enable model parallelism
+        shift_labels = shift_labels.to(shift_logits.device)
+        loss = loss_fct(shift_logits, shift_labels)
+        
         # unpadded loss
         # logits = outputs.logits
         # # shift labels by one token
@@ -1155,6 +1181,6 @@ class PatchedModel(nn.Module, PyTorchModelHubMixin):
         # shifted_labels[~is_valid_token] = 0
         # log_probs = shifted_logits.log_softmax(-1).gather(-1, shifted_labels.unsqueeze(-1)).squeeze(-1)
         # loss = -log_probs[is_valid_token].mean()
-        # outputs.loss = loss
 
+        outputs.loss = loss
         return outputs
