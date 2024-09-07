@@ -24,7 +24,7 @@ import sys
 import datasets
 import torch
 import transformers
-from transformers import AutoConfig, AutoModelForCausalLM, set_seed
+from transformers import AutoModelForCausalLM, set_seed
 
 from alignment import (
     DataArguments,
@@ -39,13 +39,11 @@ from alignment import (
     get_quantization_config,
     get_tokenizer,
 )
+
 from trl import SFTTrainer, setup_chat_format
-
-# from mamba.hybrid_wrapper import MambaTransformerHybridModelWrapper
-# from mamba.hybrid_mamba_config import MambaConfig
-
+from model import PatchedModel
 from train_configs import SFTDistillConfig
-from utils import construct_layer_dict
+from model_utils import model_config_sanity_check
 
 import torch.distributed as dist
 from datetime import timedelta
@@ -162,68 +160,20 @@ def main():
         for index in random.sample(range(len(raw_datasets["train"])), 3):
             logger.info(f"Sample {index} of the processed training set:\n\n{raw_datasets['train'][index]['text']}")
 
-    attn_implementation="flash_attention_2"
-    if not model_args.use_flash_attention_2:
-        attn_implementation="eager"
+    # load the model
+    teacher_model = AutoModelForCausalLM.from_pretrained(model_args.model_name_or_path, **model_kwargs)
+    student_model = AutoModelForCausalLM.from_pretrained(training_args.stduent_model_path, **model_kwargs)
+    
+    model_config_sanity_check(teacher_model.config)
+    model_config_sanity_check(student_model.config)
 
-    if not training_args.with_distill:
-        config = AutoConfig.from_pretrained(model_args.model_name_or_path, dtype=model_args.torch_dtype)
-        ssm_layers = training_args.ssm_layers
-        attn_layers = [i for i in range(config.num_hidden_layers) if i not in ssm_layers]
-        
-        d_xb = config.num_key_value_heads * (config.hidden_size // config.num_attention_heads)
-        d_inner = None
-        ssm_cfg = {"expand": 1}
-        
-        mamba_config = MambaConfig(
-            config.hidden_size,
-            ssm_cfg,
-            config.rms_norm_eps,
-            d_inner=d_inner,
-            d_xb=d_xb,
-            intermediate_size=config.intermediate_size,
-            hidden_act=config.hidden_act,
-            n_layer=config.num_hidden_layers,
-            attn_layers=attn_layers,
-        )
-        model = MambaTransformerHybridModelWrapper.init_distillation(
-            None, model_args.model_name_or_path, mamba_config, attn_layers=attn_layers, init_with_kqvo=training_args.init_with_kqvo, attn_implementation=attn_implementation)
-    else:
-        model = MambaTransformerHybridModelWrapper.from_pretrained(model_args.model_name_or_path, attn_implementation=attn_implementation)
-
-    if training_args.prev_checkpoint_path is not None:
-        config = AutoConfig.from_pretrained(model_args.model_name_or_path, dtype=model_args.torch_dtype)
-        prev_checkpoint = torch.load(f"{training_args.prev_checkpoint_path}/pytorch_model.bin", map_location=torch.device('cpu'))
-        prev_checkpoint_layers, is_mamba_layer = construct_layer_dict(prev_checkpoint, config.num_hidden_layers)
-        ssm_layers = training_args.ssm_layers
-        for (layer_id, layer_checkpoint) in prev_checkpoint_layers.items():
-            if is_mamba_layer[layer_id]:
-                # override weights of mamba that layer
-                model.model.model.layers[layer_id].load_state_dict(layer_checkpoint)
-            elif layer_id in ssm_layers:
-                # previous transformer layers, but now mamba layers, apply kvq transfomer
-                mlp_state_dict = {k.replace('mlp.', ''): v for k, v in layer_checkpoint.items() if k.startswith('mlp.')}
-                input_layernorm_state_dict = {k.replace('input_layernorm.', ''): v for k, v in layer_checkpoint.items() if k.startswith('input_layernorm.')}
-                post_attention_layernorm_state_dict = {k.replace('post_attention_layernorm.', ''): v for k, v in layer_checkpoint.items() if k.startswith('post_attention_layernorm.')}
-                self_attn_v_proj_state_dict = {k.replace('self_attn.v_proj.', ''): v for k, v in layer_checkpoint.items() if k.startswith('self_attn.v_proj.')}
-                self_attn_k_proj_state_dict = {k.replace('self_attn.k_proj.', ''): v for k, v in layer_checkpoint.items() if k.startswith('self_attn.k_proj.')}
-                self_attn_q_proj_state_dict = {k.replace('self_attn.q_proj.', ''): v for k, v in layer_checkpoint.items() if k.startswith('self_attn.q_proj.')}
-                self_attn_o_proj_state_dict = {k.replace('self_attn.o_proj.', ''): v for k, v in layer_checkpoint.items() if k.startswith('self_attn.o_proj.')}
-                model.model.model.layers[layer_id].mlp.load_state_dict(mlp_state_dict)
-                model.model.model.layers[layer_id].input_layernorm.load_state_dict(input_layernorm_state_dict)
-                model.model.model.layers[layer_id].post_attention_layernorm.load_state_dict(post_attention_layernorm_state_dict)
-                model.model.model.layers[layer_id].mamba.in_proj_x.load_state_dict(self_attn_v_proj_state_dict)
-                model.model.model.layers[layer_id].mamba.B_proj.load_state_dict(self_attn_k_proj_state_dict)
-                model.model.model.layers[layer_id].mamba.C_proj.load_state_dict(self_attn_q_proj_state_dict)
-                model.model.model.layers[layer_id].mamba.out_proj.load_state_dict(self_attn_o_proj_state_dict)
-            else:
-                # previous transformer layers, and now still transformer
-                model.model.model.layers[layer_id].load_state_dict(layer_checkpoint)
-
-    model.save_config(training_args.output_dir)
-    model = model.model
-    print("model:", model)
-
+    model = PatchedModel(teacher=teacher_model, 
+                 teacher_tokenizer=tokenizer,
+                 student=student_model,
+                 student_tokenizer=tokenizer,
+                 patch_len=training_args.patch_len,
+                 patch_projection=training_args.patch_projection)
+    
     ########################
     # Initialize the Trainer
     ########################

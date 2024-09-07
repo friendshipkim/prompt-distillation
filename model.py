@@ -412,7 +412,7 @@ class PatchedModel(nn.Module, PyTorchModelHubMixin):
         student_dropout_disabled: bool = False,
         teacher_lora: bool = False,
         student_lora: bool = False,
-        embedding_transform_strategy: str = "lastn",
+        embedding_transform_strategy: str = "last_n",
         add_patch_tokens: bool = False,
         use_frozen_patch_as_input: bool = False,
         bottleneck_dim: int = None,
@@ -448,7 +448,6 @@ class PatchedModel(nn.Module, PyTorchModelHubMixin):
         self.student_kv_dim = self.student.config.kv_dim
         self.teacher_num_kv_heads = self.teacher.config.num_kv_heads
         self.student_num_kv_heads = self.student.config.num_kv_heads
-
         # LORA ==============================================
         if student_lora or teacher_lora:
             from peft import (
@@ -651,6 +650,9 @@ class PatchedModel(nn.Module, PyTorchModelHubMixin):
 
         # for generation
         self.student_prepare_inputs_for_generation = self.student.prepare_inputs_for_generation
+
+    def gradient_checkpointing_enable(self, gradient_checkpointing_kwargs=None):
+        self.student.gradient_checkpointing_enable(gradient_checkpointing_kwargs=gradient_checkpointing_kwargs)
 
     def init_patch_tokens(self):
         print(f"Adding {self.patch_len} tokens to teacher tokenizer")
