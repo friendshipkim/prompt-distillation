@@ -174,6 +174,11 @@ def main():
                  patch_len=training_args.patch_len,
                  patch_projection=training_args.patch_projection)
     
+    print("model:", model)
+    for name, param in model.named_parameters():
+        if f"teacher" in name:
+            param.requires_grad = False
+
     ########################
     # Initialize the Trainer
     ########################

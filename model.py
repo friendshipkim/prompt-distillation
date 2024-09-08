@@ -11,6 +11,7 @@ from huggingface_hub import PyTorchModelHubMixin
 from einops import rearrange
 
 from transformers.cache_utils import DynamicCache
+from transformers.modeling_outputs import CausalLMOutputWithPast
 
 from model_utils import (
     EMBEDDING_TRANSFORM_STRATEGIES,
@@ -411,7 +412,7 @@ class PatchedModel(nn.Module, PyTorchModelHubMixin):
         student_tokenizer: transformers.PreTrainedTokenizer,
         patch_len: int,
         patch_projection: bool,
-        freeze_strategy: str = "student",
+        freeze_strategy: str = "teacher",
         teacher_dropout_disabled: bool = False,
         student_dropout_disabled: bool = False,
         teacher_lora: bool = False,
@@ -1181,6 +1182,5 @@ class PatchedModel(nn.Module, PyTorchModelHubMixin):
         # shifted_labels[~is_valid_token] = 0
         # log_probs = shifted_logits.log_softmax(-1).gather(-1, shifted_labels.unsqueeze(-1)).squeeze(-1)
         # loss = -log_probs[is_valid_token].mean()
-
-        outputs.loss = loss
-        return outputs
+        
+        return (loss, )
