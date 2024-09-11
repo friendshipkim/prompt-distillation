@@ -35,3 +35,7 @@ class SFTDistillConfig(SFTConfig):
         default=None,
         metadata={"help": "Embeddings from layer n"},
     )
+    debug: bool = field(
+        default=False,
+        metadata={"help": "Debug mode"},
+    )

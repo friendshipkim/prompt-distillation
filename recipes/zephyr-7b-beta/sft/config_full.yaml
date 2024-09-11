@@ -3,7 +3,7 @@ model_name_or_path: meta-llama/Meta-Llama-3.1-8B
 stduent_model_path: nvidia/Llama-3.1-Minitron-4B-Depth-Base
 model_revision: main
 torch_dtype: bfloat16
-use_flash_attention_2: true
+attn_implementation: flash_attention_2
 
 # Data training arguments
 chat_template: "{% for message in messages %}\n{% if message['role'] == 'user' %}\n{{ '<|user|>\n' + message['content'] + eos_token }}\n{% elif message['role'] == 'system' %}\n{{ '<|system|>\n' + message['content'] + eos_token }}\n{% elif message['role'] == 'assistant' %}\n{{ '<|assistant|>\n'  + message['content'] + eos_token }}\n{% endif %}\n{% if loop.last and add_generation_prompt %}\n{{ '<|assistant|>' }}\n{% endif %}\n{% endfor %}"
@@ -43,5 +43,5 @@ save_steps: 4000
 save_total_limit: 1
 seed: 42
 warmup_ratio: 0.01
-patch_len: 200
-patch_projection: false
+embedding_transform_strategy: select_layer_all
+embeddings_from_layer_n: 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 31

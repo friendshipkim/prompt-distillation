@@ -160,9 +160,11 @@ def main():
         desc="Applying chat template",
     )
 
-    # for debugging
-    train_dataset = raw_datasets["train"].select(range(100))
-    eval_dataset = raw_datasets["test"].select(range(100))
+    train_dataset = raw_datasets["train"]
+    eval_dataset = raw_datasets["test"]
+    if training_args.debug:
+        train_dataset = train_dataset.select(range(100))
+        eval_dataset = eval_dataset.select(range(100))
 
     assert "text" in train_dataset.features
     assert "text" in eval_dataset.features
@@ -175,9 +177,10 @@ def main():
     teacher_model = AutoModelForCausalLM.from_pretrained(model_args.model_name_or_path, **model_kwargs)
     student_model = AutoModelForCausalLM.from_pretrained(training_args.stduent_model_path, **model_kwargs)
 
-    # HACK drop last 11 layers from the student model
-    student_model.model.layers = student_model.model.layers[:11]
-    student_model.config.n_layer = 11
+    # # HACK for debugging with small models, drop last 11 layers from the student model
+    if training_args.debug:
+        student_model.model.layers = student_model.model.layers[:11]
+        student_model.config.n_layer = 11
 
     model_config_sanity_check(teacher_model.config)
     model_config_sanity_check(student_model.config)
