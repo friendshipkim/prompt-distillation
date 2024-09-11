@@ -523,7 +523,7 @@ class PatchedModel(nn.Module, PyTorchModelHubMixin):
             )
         elif embedding_transform_strategy == "select_layer_all":
             assert embeddings_from_layer_n is not None
-            assert len(embeddings_from_layer_n) == self.student_num_layers
+            assert len(embeddings_from_layer_n) == self.student_num_layers, f"length mismatch, {len(embeddings_from_layer_n)} != {self.student_num_layers}"
             assert self.teacher_kv_dim == self.student_kv_dim
             self.embedding_proj = None
             self.patch_encoder = None

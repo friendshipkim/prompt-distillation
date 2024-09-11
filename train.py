@@ -110,6 +110,7 @@ def main():
     ################
     # here we assume the tokenizer is the same for both the teacher and the student
     tokenizer = get_tokenizer(model_args, data_args)
+    tokenizer.model_max_length = training_args.max_seq_length
 
     #######################
     # Load pretrained model
@@ -139,6 +140,16 @@ def main():
         model_kwargs = None
 
     #####################
+    # remove rows without "assistant" in the label field
+    #####################
+    def exists_assistant(example):
+        for messages in example["messages"]:
+            if messages["role"] == "assistant":
+                return True
+        return False
+    raw_datasets = raw_datasets.filter(exists_assistant, num_proc=data_args.preprocessing_num_workers)
+
+    #####################
     # Apply chat template
     #####################
     # <|system|>
@@ -160,6 +171,23 @@ def main():
         desc="Applying chat template",
     )
 
+    #####################
+    # remove long examples
+    #####################
+    def check_overflows(example, tokenizer, max_seq_length):
+        if len(tokenizer.encode(example["text"])) > max_seq_length:
+            return False
+        else:
+            return True
+    raw_datasets = raw_datasets.filter(
+        check_overflows,
+        fn_kwargs={
+            "tokenizer": tokenizer,
+            "max_seq_length": training_args.pre_filter_max_seq_length,
+        },
+        num_proc=data_args.preprocessing_num_workers,
+    )
+
     train_dataset = raw_datasets["train"]
     eval_dataset = raw_datasets["test"]
     if training_args.debug_mode:
@@ -177,15 +205,15 @@ def main():
     teacher_model = AutoModelForCausalLM.from_pretrained(model_args.model_name_or_path, **model_kwargs)
     student_model = AutoModelForCausalLM.from_pretrained(training_args.stduent_model_path, **model_kwargs)
 
-    # # HACK for debugging with small models, drop last 11 layers from the student model
-    if training_args.debug_mode:
-        student_model.model.layers = student_model.model.layers[:11]
-        student_model.config.n_layer = 11
-
     model_config_sanity_check(teacher_model.config)
     model_config_sanity_check(student_model.config)
 
     training_args.embeddings_from_layer_n = list(map(int, training_args.embeddings_from_layer_n.split(",")))
+    # HACK for debugging with small models, drop last 11 layers from the student model
+    if training_args.debug_mode:
+        student_model.model.layers = student_model.model.layers[:len(training_args.embeddings_from_layer_n)]
+        student_model.config.n_layer = len(training_args.embeddings_from_layer_n)
+
     model = PatchedModel(
         teacher=teacher_model,
         teacher_tokenizer=tokenizer,

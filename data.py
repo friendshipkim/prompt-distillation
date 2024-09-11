@@ -222,13 +222,13 @@ class CustomDataCollatorForCompletionOnlyLM(DataCollatorMixin):
                 response_token_ids_start_idx = idx
 
         if response_token_ids_start_idx is None:
-            warnings.warn(
+            raise ValueError(
                 f"Could not find response key `{self.response_template}` in the "
                 f'following instance: {self.tokenizer.decode(input_ids)} '
                 f"This instance will be ignored in loss calculation. "
                 f"Note, if this happens often, consider increasing the `max_seq_length`."
             )
-            labels[:] = self.ignore_index
+            # labels[:] = self.ignore_index
         else:
             response_token_ids_end_idx = response_token_ids_start_idx + len(self.response_token_ids)
 

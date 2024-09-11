@@ -39,3 +39,7 @@ class SFTDistillConfig(SFTConfig):
         default=False,
         metadata={"help": "Debug mode"},
     )
+    pre_filter_max_seq_length: Optional[int] = field(
+        default=8000,
+        metadata={"help": "max sequence length for filtering long sequences before training"},
+    )
