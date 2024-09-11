@@ -1,6 +1,7 @@
 # Model arguments
 model_name_or_path: TinyLlama/TinyLlama-1.1B-step-50K-105b
 # model_name_or_path: meta-llama/Meta-Llama-3.1-8B
+# model_name_or_path: nvidia/Llama-3.1-Minitron-4B-Depth-Base
 stduent_model_path: TinyLlama/TinyLlama-1.1B-step-50K-105b
 # stduent_model_path: nvidia/Llama-3.1-Minitron-4B-Depth-Base
 model_revision: main
@@ -29,13 +30,14 @@ log_level: info
 logging_steps: 10
 logging_strategy: steps
 lr_scheduler_type: cosine
-max_seq_length: 2048
+max_seq_length: 8192
+pre_filter_max_seq_length: 8000
 max_steps: -1
 num_train_epochs: 1
 output_dir: test_sft/
 overwrite_output_dir: true
 per_device_eval_batch_size: 1
-per_device_train_batch_size: 2
+per_device_train_batch_size: 1
 push_to_hub: false
 remove_unused_columns: true
 report_to:
@@ -47,5 +49,6 @@ seed: 42
 warmup_ratio: 0.01
 embedding_transform_strategy: select_layer_all
 embeddings_from_layer_n: 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
+# embeddings_from_layer_n: 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
 # embeddings_from_layer_n: 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 31
 debug_mode: true

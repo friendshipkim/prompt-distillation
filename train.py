@@ -30,7 +30,6 @@ from alignment import (
     DataArguments,
     H4ArgumentParser,
     ModelArguments,
-    apply_chat_template,
     decontaminate_humaneval,
     get_checkpoint,
     get_datasets,
@@ -44,7 +43,7 @@ from trl import SFTTrainer, setup_chat_format
 from model import PatchedModel
 from train_configs import SFTDistillConfig
 from model_utils import model_config_sanity_check
-from data import CustomDataCollatorForCompletionOnlyLM, DataCollatorForCompletionOnlyLM
+from data import CustomDataCollatorForCompletionOnlyLM, process_raw_datasets
 import torch.distributed as dist
 from datetime import timedelta
 
@@ -103,7 +102,6 @@ def main():
     logger.info(
         f"Training on the following datasets and their proportions: {[split + ' : ' + str(dset.num_rows) for split, dset in raw_datasets.items()]}"
     )
-    column_names = list(raw_datasets["train"].features)
 
     ################
     # Load tokenizer
@@ -139,55 +137,14 @@ def main():
         model, tokenizer = setup_chat_format(model, tokenizer)
         model_kwargs = None
 
-    #####################
-    # remove rows without "assistant" in the label field
-    #####################
-    def exists_assistant(example):
-        for messages in example["messages"]:
-            if messages["role"] == "assistant":
-                return True
-        return False
-    raw_datasets = raw_datasets.filter(exists_assistant, num_proc=data_args.preprocessing_num_workers)
-
-    #####################
-    # Apply chat template
-    #####################
-    # <|system|>
-    # {system_prompt}<|end_of_text|>
-    # <|user|>
-    # {user_prompt}<|end_of_text|>
-    # <|assistant|>
-    # {assistant_prompt}<|end_of_text|>
-    # everything is in the text field
-    raw_datasets = raw_datasets.map(
-        apply_chat_template,
-        fn_kwargs={
-            "tokenizer": tokenizer,
-            "task": "sft",
-            "auto_insert_empty_system_msg": data_args.auto_insert_empty_system_msg,
-        },
-        num_proc=data_args.preprocessing_num_workers,
-        remove_columns=column_names,
-        desc="Applying chat template",
+    # preprocess the datasets
+    raw_datasets = process_raw_datasets(
+        raw_datasets,
+        tokenizer,
+        data_args.preprocessing_num_workers,
+        training_args.pre_filter_max_seq_length,
+        data_args.auto_insert_empty_system_msg
     )
-
-    #####################
-    # remove long examples
-    #####################
-    def check_overflows(example, tokenizer, max_seq_length):
-        if len(tokenizer.encode(example["text"])) > max_seq_length:
-            return False
-        else:
-            return True
-    raw_datasets = raw_datasets.filter(
-        check_overflows,
-        fn_kwargs={
-            "tokenizer": tokenizer,
-            "max_seq_length": training_args.pre_filter_max_seq_length,
-        },
-        num_proc=data_args.preprocessing_num_workers,
-    )
-
     train_dataset = raw_datasets["train"]
     eval_dataset = raw_datasets["test"]
     if training_args.debug_mode:

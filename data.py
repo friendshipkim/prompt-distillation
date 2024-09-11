@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from transformers import PreTrainedTokenizerBase
 from transformers.data.data_collator import DataCollatorMixin
+from alignment import apply_chat_template
 
 
 def _torch_collate_batch(examples, tokenizer, pad_value: Optional[int] = None, pad_to_multiple_of: Optional[int] = None):
@@ -251,3 +252,57 @@ class CustomDataCollatorForCompletionOnlyLM(DataCollatorMixin):
         assert len(student_labels) == len(student_input_ids)
 
         return teacher_input_ids, student_input_ids, teacher_attention_mask, student_attention_mask, student_labels
+
+
+def process_raw_datasets(raw_datasets, tokenizer, preprocessing_num_workers, pre_filter_max_seq_length, auto_insert_empty_system_msg):
+    column_names = list(raw_datasets["train"].features)
+
+    #####################
+    # remove rows without "assistant" in the label field
+    #####################
+    def exists_assistant(example):
+        for messages in example["messages"]:
+            if messages["role"] == "assistant":
+                return True
+        return False
+    raw_datasets = raw_datasets.filter(exists_assistant, num_proc=preprocessing_num_workers)
+
+    #####################
+    # Apply chat template
+    #####################
+    # <|system|>
+    # {system_prompt}<|end_of_text|>
+    # <|user|>
+    # {user_prompt}<|end_of_text|>
+    # <|assistant|>
+    # {assistant_prompt}<|end_of_text|>
+    # everything is in the text field
+    raw_datasets = raw_datasets.map(
+        apply_chat_template,
+        fn_kwargs={
+            "tokenizer": tokenizer,
+            "task": "sft",
+            "auto_insert_empty_system_msg": auto_insert_empty_system_msg,
+        },
+        num_proc=preprocessing_num_workers,
+        remove_columns=column_names,
+        desc="Applying chat template",
+    )
+
+    #####################
+    # remove long examples
+    #####################
+    def check_overflows(example, tokenizer, max_seq_length):
+        if len(tokenizer.encode(example["text"])) > max_seq_length:
+            return False
+        else:
+            return True
+    raw_datasets = raw_datasets.filter(
+        check_overflows,
+        fn_kwargs={
+            "tokenizer": tokenizer,
+            "max_seq_length": pre_filter_max_seq_length,
+        },
+        num_proc=preprocessing_num_workers,
+    )
+    return raw_datasets
