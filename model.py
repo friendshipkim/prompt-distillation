@@ -437,9 +437,6 @@ class PatchedModel(nn.Module, PyTorchModelHubMixin):
         self.student_dim = student.config.hidden_size
         self.student_tokenizer = student_tokenizer
         self.teacher_tokenizer = teacher_tokenizer
-        self.gate = nn.Parameter(torch.zeros(1).fill_(gate_init_val))
-        if freeze_gate:
-            self.gate.requires_grad = False
         self.ignore_prefix = ignore_prefix
         self.offset_pos_id = offset_pos_id
 
@@ -1119,11 +1116,12 @@ class PatchedModel(nn.Module, PyTorchModelHubMixin):
         if "desc" in self.embedding_transform_strategy:
             # variable kv length, use teacher attention mask
             prefix_attention_mask = tr_attention_mask
+        elif self.embedding_transform_strategy == "select_layer_all":
+            prefix_attention_mask = tr_attention_mask
         else:
             prefix_attention_mask = self.get_patch_attention_mask(batch_size=input_ids.shape[0])
         prefix_attention_mask = prefix_attention_mask.expand(input_ids.shape[0], -1)
         concat_attention_mask = torch.cat([prefix_attention_mask, st_attention_mask], dim=1)
-        gate_attention_mask = torch.cat([self.gate * prefix_attention_mask, st_attention_mask], dim=1)
 
         # starting from 0, shape: [1, student_seq_len]
         position_ids = torch.arange(0, input_ids.shape[-1], dtype=torch.long, device=input_ids.device)
@@ -1137,7 +1135,6 @@ class PatchedModel(nn.Module, PyTorchModelHubMixin):
         return {
             "position_ids": position_ids.to(torch.long),
             "attention_mask": concat_attention_mask,
-            "gate_attention_mask": gate_attention_mask,
         }
 
     def forward(
@@ -1160,7 +1157,6 @@ class PatchedModel(nn.Module, PyTorchModelHubMixin):
             teacher_attention_mask=teacher_attention_mask,
             batch_size=input_ids.shape[0],
         )
-        # past_key_values = [item*self.gate for item in past_key_values]
 
         past_key_cache = DynamicCache()
 
