@@ -400,7 +400,7 @@ class PatchedModel(nn.Module, PyTorchModelHubMixin):
 
     embedding_transform_strategy: str  # Way to transform teacher embedding into patch_len embeddings
     add_patch_tokens: bool  # Whether to add patch tokens to the teacher input sequence
-    embeddings_from_layer_n: bool  # Which hidden state of teacher layer to use for embeddings, default: -1 (last)
+    embeddings_from_layer_n: list  # Which hidden state of teacher layer to use for embeddings
     freeze_teacher: bool  # Whether to freeze teacher model, turn off dropout too
     freeze_student: bool  # Whether to freeze student model, turn off dropout too
 
@@ -411,18 +411,18 @@ class PatchedModel(nn.Module, PyTorchModelHubMixin):
         student: transformers.AutoModelForCausalLM,
         student_tokenizer: transformers.PreTrainedTokenizer,
         patch_len: int,
-        patch_projection: bool,
+        patch_projection: bool = False,
         freeze_strategy: str = "teacher",
         teacher_dropout_disabled: bool = False,
         student_dropout_disabled: bool = False,
         teacher_lora: bool = False,
         student_lora: bool = False,
-        embedding_transform_strategy: str = "last_n",
+        embedding_transform_strategy: str = "select_layer_all",
         add_patch_tokens: bool = False,
         use_frozen_patch_as_input: bool = False,
         bottleneck_dim: int = None,
         drop_p: float = 0.0,
-        embeddings_from_layer_n: int = None,
+        embeddings_from_layer_n: list = None,
         random_patch: bool = False,
         ignore_prefix: bool = False,
         gate_init_val: float = 0,
@@ -524,6 +524,12 @@ class PatchedModel(nn.Module, PyTorchModelHubMixin):
                 bottleneck_dim=bottleneck_dim,
                 drop_p=drop_p,
             )
+        elif embedding_transform_strategy == "select_layer_all":
+            assert embeddings_from_layer_n is not None
+            assert len(embeddings_from_layer_n) == self.student_num_layers
+            assert self.teacher_kv_dim == self.student_kv_dim
+            self.embedding_proj = None
+            self.patch_encoder = None
         elif embedding_transform_strategy in ["layerwise_pool_and_project", "layerwise_last_and_project"]:
             self.embedding_proj = nn.ModuleList(
                 [
@@ -634,9 +640,7 @@ class PatchedModel(nn.Module, PyTorchModelHubMixin):
         if self.patch_encoder is not None:
             self.patch_encoder = self.patch_encoder.to(self.student_dtype)
 
-        self.embeddings_from_layer_n = (
-            -1 if embeddings_from_layer_n is None else embeddings_from_layer_n
-        )
+        self.embeddings_from_layer_n = embeddings_from_layer_n
         # =================================================== #
 
         # disable dropout
@@ -726,24 +730,43 @@ class PatchedModel(nn.Module, PyTorchModelHubMixin):
         # last_hidden_state shape: [batch_size, seq_len, hidden_size]
         # output embeddings shape: [batch_size, patch_len, hidden_size]
         if self.embedding_transform_strategy == "last_n":
-            last_hidden_state = outputs.hidden_states[self.embeddings_from_layer_n].to(self.student_dtype)
+            last_hidden_state = outputs.hidden_states[-1].to(self.student_dtype)
             embeddings = extract_last_n(last_hidden_state, attention_mask, self.patch_len)
             # embeddings = last_hidden_state[:, -self.patch_len :, :]
         elif self.embedding_transform_strategy == "last_and_project":
-            last_hidden_state = outputs.hidden_states[self.embeddings_from_layer_n].to(self.student_dtype)
+            last_hidden_state = outputs.hidden_states[-1].to(self.student_dtype)
             # last token embeddings: [batch_size, hidden_size]
             pooled_embeddings = extract_last_n(last_hidden_state, attention_mask, 1).squeeze(1)
             # project embedding and reshape to [batch_size, patch_len, hidden_size]
             embeddings = self.embedding_proj(pooled_embeddings)
             embeddings = embeddings.view(-1, self.patch_len, self.teacher_dim)
         elif self.embedding_transform_strategy == "pool_and_project":
-            last_hidden_state = outputs.hidden_states[self.embeddings_from_layer_n].to(self.student_dtype)
+            last_hidden_state = outputs.hidden_states[-1].to(self.student_dtype)
             # pooled_embeddings: [batch_size, hidden_size]
             pooled_embeddings = mean_pool(last_hidden_state, attention_mask)  # or max_pool, stack_pool
 
             # project embedding and reshape to [batch_size, patch_len, hidden_size]
             embeddings = self.embedding_proj(pooled_embeddings)
             embeddings = embeddings.view(-1, self.patch_len, self.teacher_dim)
+
+        # use kv cache of selected layers
+        # hidden_states shape: [batch_size, num_layers, seq_len, hidden_size]
+        elif self.embedding_transform_strategy == "select_layer_all":
+            bsz = attention_mask.shape[0]
+            # patch len is the length of longest sequence
+            self.patch_len = outputs.logits.shape[1]
+            extract_layers = self.embeddings_from_layer_n
+
+            # tuple of length num_layers, each with tuple of length 2
+            # each with tensor of shape [batch_size, num_heads, seq_len, teacher_dim // num_heads]
+            teacher_kv = outputs["past_key_values"]
+            embeddings = torch.stack(tuple(rearrange_kv_tuple(teacher_kv[l], extract_last_n, attention_mask, self.patch_len) for l in extract_layers), dim=0).to(self.student_dtype)
+            assert (self.student_num_layers, 2, bsz, self.patch_len, self.teacher_kv_dim) == embeddings.shape
+
+            # [num_layers * 2, bsz, patch_len, teacher_dim]
+            embeddings = rearrange(embeddings, 'l kv ... -> (l kv) ...')
+            # [bsz, seq_len, num_layers * 2, teacher_dim]
+            embeddings = rearrange(embeddings, 'l b p d -> b p l d')
 
         # use hidden states of multiple layers
         # hidden_states shape: [batch_size, num_layers, seq_len, hidden_size]
@@ -851,6 +874,7 @@ class PatchedModel(nn.Module, PyTorchModelHubMixin):
             input_ids=input_ids,
             attention_mask=attention_mask,
             output_hidden_states=True,
+            use_cache=True,
             # output_attentions=True
         )
         # teacher_attentions = model_output["attentions"]
@@ -1125,9 +1149,11 @@ class PatchedModel(nn.Module, PyTorchModelHubMixin):
         # teacher_attention_mask: Optional[torch.Tensor],
         **kwargs,
     ) -> Dict[str, torch.Tensor]:
-        
+
         teacher_input_ids, input_ids = torch.chunk(input_ids, 2, dim=-1)
         teacher_attention_mask, attention_mask = torch.chunk(attention_mask, 2, dim=-1)
+        # print(f"teacher_input_ids: {teacher_input_ids.shape}")
+        # print(f"input_ids: {input_ids.shape}")
 
         past_key_values = self.embed_and_project(
             teacher_input_ids=teacher_input_ids,
@@ -1155,7 +1181,8 @@ class PatchedModel(nn.Module, PyTorchModelHubMixin):
         )
 
         logits = outputs.logits.float()
-        labels = labels[..., labels.shape[1]//2:]
+        labels = labels[..., (labels.shape[1] + 1) // 2:]  # TODO change here to match student's output
+        assert logits.shape[1] == labels.shape[1], f"logits {logits.shape} != labels {labels.shape}"
         shift_logits = logits[..., :-1, :].contiguous()
         shift_labels = labels[..., 1:].contiguous()
 
@@ -1166,7 +1193,7 @@ class PatchedModel(nn.Module, PyTorchModelHubMixin):
         # Enable model parallelism
         shift_labels = shift_labels.to(shift_logits.device)
         loss = loss_fct(shift_logits, shift_labels)
-        
+
         # unpadded loss
         # logits = outputs.logits
         # # shift labels by one token
@@ -1182,5 +1209,5 @@ class PatchedModel(nn.Module, PyTorchModelHubMixin):
         # shifted_labels[~is_valid_token] = 0
         # log_probs = shifted_logits.log_softmax(-1).gather(-1, shifted_labels.unsqueeze(-1)).squeeze(-1)
         # loss = -log_probs[is_valid_token].mean()
-        
+
         return (loss, )

@@ -1,9 +1,7 @@
-from typing import Any, Dict
 from einops import rearrange
 
 import torch
 import torch.nn as nn
-import transformers
 
 # from prefix_model import PrefixModel, PatchedModel
 
@@ -31,6 +29,7 @@ EMBEDDING_TRANSFORM_STRATEGIES = [
     "last_n",
     "last_and_project",
     "pool_and_project",
+    "select_layer_all",
     "layerwise_pool_and_project",
     "layerwise_pool_and_share_project",
     "layerwise_share_pool_and_share_project",

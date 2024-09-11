@@ -44,14 +44,15 @@ from trl import SFTTrainer, setup_chat_format
 from model import PatchedModel
 from train_configs import SFTDistillConfig
 from model_utils import model_config_sanity_check
-
+from data import preprocess_datasets, DataCollatorForCompletionOnlyLM
 import torch.distributed as dist
 from datetime import timedelta
 
 logger = logging.getLogger(__name__)
 
+
 def main():
-    
+
     dist.init_process_group(backend='nccl', timeout=timedelta(seconds=360000))
 
     parser = H4ArgumentParser((ModelArguments, DataArguments, SFTDistillConfig))
@@ -108,6 +109,7 @@ def main():
     ################
     # Load tokenizer
     ################
+    # here we assume the tokenizer is the same for both the teacher and the student
     tokenizer = get_tokenizer(model_args, data_args)
 
     #######################
@@ -122,7 +124,7 @@ def main():
     model_kwargs = dict(
         revision=model_args.model_revision,
         trust_remote_code=model_args.trust_remote_code,
-        use_flash_attention_2=model_args.use_flash_attention_2,
+        attn_implementation=model_args.attn_implementation,
         torch_dtype=torch_dtype,
         use_cache=False,
         # use_cache=False if training_args.gradient_checkpointing else True,
@@ -140,6 +142,13 @@ def main():
     #####################
     # Apply chat template
     #####################
+    # <|system|>
+    # {system_prompt}<|end_of_text|>
+    # <|user|>
+    # {user_prompt}<|end_of_text|>
+    # <|assistant|>
+    # {assistant_prompt}<|end_of_text|>
+    # everything is in the text field
     raw_datasets = raw_datasets.map(
         apply_chat_template,
         fn_kwargs={
@@ -152,9 +161,15 @@ def main():
         desc="Applying chat template",
     )
 
+    # for debugging
+    train_dataset = raw_datasets["train"].select(range(100))
+    eval_dataset = raw_datasets["test"].select(range(100))
 
-    train_dataset = raw_datasets["train"]
-    eval_dataset = raw_datasets["test"]
+    assert "text" in train_dataset.features
+    assert "text" in eval_dataset.features
+
+    # # preprocessing
+    # train_dataset, eval_dataset = preprocess_datasets(train_dataset, eval_dataset, tokenizer)
 
     with training_args.main_process_first(desc="Log a few random samples from the processed training set"):
         for index in random.sample(range(len(raw_datasets["train"])), 3):
@@ -163,25 +178,35 @@ def main():
     # load the model
     teacher_model = AutoModelForCausalLM.from_pretrained(model_args.model_name_or_path, **model_kwargs)
     student_model = AutoModelForCausalLM.from_pretrained(training_args.stduent_model_path, **model_kwargs)
-    
+
+    # HACK drop last 11 layers from the student model
+    student_model.model.layers = student_model.model.layers[:11]
+    student_model.config.n_layer = 11
+
     model_config_sanity_check(teacher_model.config)
     model_config_sanity_check(student_model.config)
 
-    model = PatchedModel(teacher=teacher_model, 
-                 teacher_tokenizer=tokenizer,
-                 student=student_model,
-                 student_tokenizer=tokenizer,
-                 patch_len=training_args.patch_len,
-                 patch_projection=training_args.patch_projection)
-    
+    training_args.embeddings_from_layer_n = list(map(int, training_args.embeddings_from_layer_n.split(",")))
+    model = PatchedModel(
+        teacher=teacher_model,
+        teacher_tokenizer=tokenizer,
+        student=student_model,
+        student_tokenizer=tokenizer,
+        patch_len=training_args.patch_len,
+        embedding_transform_strategy=training_args.embedding_transform_strategy,
+        embeddings_from_layer_n=training_args.embeddings_from_layer_n,
+    )
+
     print("model:", model)
     for name, param in model.named_parameters():
-        if f"teacher" in name:
+        if "teacher" in name:
             param.requires_grad = False
 
     ########################
     # Initialize the Trainer
     ########################
+    response_template = "\n<|assistant|>\n"
+    collator = DataCollatorForCompletionOnlyLM(response_template, tokenizer=tokenizer)
     trainer = SFTTrainer(
         model=model,
         # model_init_kwargs=model_kwargs,
@@ -191,9 +216,10 @@ def main():
         dataset_text_field="text",
         max_seq_length=training_args.max_seq_length,
         tokenizer=tokenizer,
-        packing=True,
+        packing=False,
         peft_config=get_peft_config(model_args),
         dataset_kwargs=training_args.dataset_kwargs,
+        data_collator=collator,
     )
 
     ###############

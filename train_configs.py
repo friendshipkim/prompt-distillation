@@ -9,6 +9,7 @@ from alignment import SFTConfig
 
 DataClassType = NewType("DataClassType", Any)
 
+
 @dataclass
 class SFTDistillConfig(SFTConfig):
     """
@@ -18,13 +19,19 @@ class SFTDistillConfig(SFTConfig):
         default=None,
         metadata={"help": "Path to the previous distilled model in this progressive distillation."},
     )
-    patch_len: int = field(
+    patch_len: Optional[int] = field(
         default=100,
         metadata={"help": "Patch length"},
     )
-    patch_projection: bool = field(
-        default=False,
-        metadata={"help": "Patch projection"},
+    # patch_projection: bool = field(
+    #     default=False,
+    #     metadata={"help": "Patch projection"},
+    # )
+    embedding_transform_strategy: str = field(
+        default="select_layer_all",
+        metadata={"help": "Embedding transform strategy"},
     )
-    
-    
+    embeddings_from_layer_n: List[int] = field(
+        default=None,
+        metadata={"help": "Embeddings from layer n"},
+    )
