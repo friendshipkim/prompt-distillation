@@ -44,7 +44,7 @@ from trl import SFTTrainer, setup_chat_format
 from model import PatchedModel
 from train_configs import SFTDistillConfig
 from model_utils import model_config_sanity_check
-from data import preprocess_datasets, DataCollatorForCompletionOnlyLM
+from data import CustomDataCollatorForCompletionOnlyLM, DataCollatorForCompletionOnlyLM
 import torch.distributed as dist
 from datetime import timedelta
 
@@ -57,7 +57,6 @@ def main():
 
     parser = H4ArgumentParser((ModelArguments, DataArguments, SFTDistillConfig))
     model_args, data_args, training_args = parser.parse()
-    # breakpoint()
 
     # Set seed for reproducibility
     set_seed(training_args.seed)
@@ -168,9 +167,6 @@ def main():
     assert "text" in train_dataset.features
     assert "text" in eval_dataset.features
 
-    # # preprocessing
-    # train_dataset, eval_dataset = preprocess_datasets(train_dataset, eval_dataset, tokenizer)
-
     with training_args.main_process_first(desc="Log a few random samples from the processed training set"):
         for index in random.sample(range(len(raw_datasets["train"])), 3):
             logger.info(f"Sample {index} of the processed training set:\n\n{raw_datasets['train'][index]['text']}")
@@ -205,8 +201,12 @@ def main():
     ########################
     # Initialize the Trainer
     ########################
+    # # baseline
+    # response_template = "\n<|assistant|>\n"
+    # collator = DataCollatorForCompletionOnlyLM(response_template, tokenizer=tokenizer)
+    # ours
     response_template = "\n<|assistant|>\n"
-    collator = DataCollatorForCompletionOnlyLM(response_template, tokenizer=tokenizer)
+    collator = CustomDataCollatorForCompletionOnlyLM(tokenizer, response_template, teacher_ratio=0.5)
     trainer = SFTTrainer(
         model=model,
         # model_init_kwargs=model_kwargs,

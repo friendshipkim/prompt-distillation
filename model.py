@@ -1145,13 +1145,13 @@ class PatchedModel(nn.Module, PyTorchModelHubMixin):
         input_ids: torch.Tensor,
         labels: torch.Tensor,
         attention_mask: torch.Tensor,
-        # teacher_input_ids: Optional[torch.Tensor],
-        # teacher_attention_mask: Optional[torch.Tensor],
+        teacher_input_ids: Optional[torch.Tensor],
+        teacher_attention_mask: Optional[torch.Tensor],
         **kwargs,
     ) -> Dict[str, torch.Tensor]:
 
-        teacher_input_ids, input_ids = torch.chunk(input_ids, 2, dim=-1)
-        teacher_attention_mask, attention_mask = torch.chunk(attention_mask, 2, dim=-1)
+        # teacher_input_ids, input_ids = torch.chunk(input_ids, 2, dim=-1)
+        # teacher_attention_mask, attention_mask = torch.chunk(attention_mask, 2, dim=-1)
         # print(f"teacher_input_ids: {teacher_input_ids.shape}")
         # print(f"input_ids: {input_ids.shape}")
 
@@ -1181,7 +1181,7 @@ class PatchedModel(nn.Module, PyTorchModelHubMixin):
         )
 
         logits = outputs.logits.float()
-        labels = labels[..., (labels.shape[1] + 1) // 2:]  # TODO change here to match student's output
+        # labels = labels[..., (labels.shape[1] + 1) // 2:]
         assert logits.shape[1] == labels.shape[1], f"logits {logits.shape} != labels {labels.shape}"
         shift_logits = logits[..., :-1, :].contiguous()
         shift_labels = labels[..., 1:].contiguous()
