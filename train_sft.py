@@ -41,13 +41,15 @@ from alignment import (
     get_tokenizer,
 )
 from trl import SFTTrainer, setup_chat_format
+from data import DataCollatorForCompletionOnlyLM, process_raw_datasets
+from train_configs import SFTDistillConfig
 
 
 logger = logging.getLogger(__name__)
 
 
 def main():
-    parser = H4ArgumentParser((ModelArguments, DataArguments, SFTConfig))
+    parser = H4ArgumentParser((ModelArguments, DataArguments, SFTDistillConfig))
     model_args, data_args, training_args = parser.parse()
 
     # Set seed for reproducibility
@@ -94,12 +96,12 @@ def main():
     logger.info(
         f"Training on the following datasets and their proportions: {[split + ' : ' + str(dset.num_rows) for split, dset in raw_datasets.items()]}"
     )
-    column_names = list(raw_datasets["train"].features)
 
     ################
     # Load tokenizer
     ################
     tokenizer = get_tokenizer(model_args, data_args)
+    tokenizer.model_max_length = training_args.max_seq_length
 
     #######################
     # Load pretrained model
@@ -113,7 +115,7 @@ def main():
     model_kwargs = dict(
         revision=model_args.model_revision,
         trust_remote_code=model_args.trust_remote_code,
-        use_flash_attention_2=model_args.use_flash_attention_2,
+        attn_implementation=model_args.attn_implementation,
         torch_dtype=torch_dtype,
         use_cache=False if training_args.gradient_checkpointing else True,
         device_map=get_kbit_device_map() if quantization_config is not None else None,
@@ -127,31 +129,14 @@ def main():
         model, tokenizer = setup_chat_format(model, tokenizer)
         model_kwargs = None
 
-    #####################
-    # Apply chat template
-    #####################
-    raw_datasets = raw_datasets.map(
-        apply_chat_template,
-        fn_kwargs={
-            "tokenizer": tokenizer,
-            "task": "sft",
-            "auto_insert_empty_system_msg": data_args.auto_insert_empty_system_msg,
-        },
-        num_proc=data_args.preprocessing_num_workers,
-        remove_columns=column_names,
-        desc="Applying chat template",
+    # preprocess the datasets
+    raw_datasets = process_raw_datasets(
+        raw_datasets,
+        tokenizer,
+        data_args.preprocessing_num_workers,
+        training_args.pre_filter_max_seq_length,
+        data_args.auto_insert_empty_system_msg
     )
-
-    ##########################
-    # Decontaminate benchmarks
-    ##########################
-    num_raw_train_samples = len(raw_datasets["train"])
-    raw_datasets = raw_datasets.filter(decontaminate_humaneval, batched=True, batch_size=10_000, num_proc=1)
-    num_filtered_train_samples = num_raw_train_samples - len(raw_datasets["train"])
-    logger.info(
-        f"Decontaminated {num_filtered_train_samples} ({num_filtered_train_samples/num_raw_train_samples * 100:.2f}%) samples from the training set."
-    )
-
     train_dataset = raw_datasets["train"]
     eval_dataset = raw_datasets["test"]
 
@@ -162,6 +147,9 @@ def main():
     ########################
     # Initialize the Trainer
     ########################
+    # for baseline
+    response_template = "\n<|assistant|>\n"
+    collator = DataCollatorForCompletionOnlyLM(tokenizer, response_template)
     trainer = SFTTrainer(
         model=model,
         model_init_kwargs=model_kwargs,
@@ -171,9 +159,10 @@ def main():
         dataset_text_field="text",
         max_seq_length=training_args.max_seq_length,
         tokenizer=tokenizer,
-        packing=True,
+        packing=False,
         peft_config=get_peft_config(model_args),
         dataset_kwargs=training_args.dataset_kwargs,
+        data_collator=collator,
     )
 
     ###############
