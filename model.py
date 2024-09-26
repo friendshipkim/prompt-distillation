@@ -800,11 +800,11 @@ class PatchedModel(nn.Module, PyTorchModelHubMixin):
             # apply self.embedding_proj to each layer
             embeddings = tuple(proj(embed) for embed, proj in zip(embeddings, self.embedding_proj))
             embeddings = torch.stack(embeddings, dim=0).to(self.student_dtype)
-            assert (self.teacher_num_layers, 2, bsz, self.patch_len, self.teacher_kv_dim) == embeddings.shape
+            assert (self.teacher_num_layers, 2, bsz, self.patch_len, self.student_kv_dim) == embeddings.shape
 
-            # [num_layers * 2, bsz, patch_len, teacher_dim]
+            # [num_layers * 2, bsz, patch_len, student_kv_dim]
             embeddings = rearrange(embeddings, 'l kv ... -> (l kv) ...')
-            # [bsz, seq_len, num_layers * 2, teacher_dim]
+            # [bsz, seq_len, num_layers * 2, student_kv_dim]
             embeddings = rearrange(embeddings, 'l b p d -> b p l d')
 
         # use hidden states of multiple layers

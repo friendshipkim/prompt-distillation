@@ -162,8 +162,8 @@ def main():
     teacher_model = AutoModelForCausalLM.from_pretrained(model_args.model_name_or_path, **model_kwargs)
     student_model = AutoModelForCausalLM.from_pretrained(training_args.stduent_model_path, **model_kwargs)
 
-    model_config_sanity_check(teacher_model.config)
-    model_config_sanity_check(student_model.config)
+    model_config_sanity_check(teacher_model)
+    model_config_sanity_check(student_model)
 
     if training_args.embeddings_from_layer_n is not None:
         training_args.embeddings_from_layer_n = list(map(int, training_args.embeddings_from_layer_n.split(",")))

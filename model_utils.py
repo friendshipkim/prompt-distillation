@@ -1,4 +1,5 @@
 from einops import rearrange
+from transformers import LlamaForCausalLM
 
 import torch
 import torch.nn as nn
@@ -187,10 +188,17 @@ def stack_pool(hidden_states: torch.Tensor, attention_mask: torch.Tensor) -> tor
     return pooled_outputs
 
 
-def model_config_sanity_check(config):
+def model_config_sanity_check(model):
+    config = model.config
+    is_llama = isinstance(model, LlamaForCausalLM)
     if not hasattr(config, "n_layer"):
         config.n_layer = config.num_hidden_layers
-    if hasattr(config, "num_key_value_heads"):
+
+    if is_llama:
+        config.head_dim = model.model.layers[0].self_attn.head_dim
+        config.num_kv_heads = model.model.layers[0].self_attn.num_key_value_heads
+        config.kv_dim = config.num_kv_heads * config.head_dim
+    elif hasattr(config, "num_key_value_heads"):
         head_dim = config.hidden_size // config.num_attention_heads
         kv_dim = config.num_key_value_heads * head_dim
 
