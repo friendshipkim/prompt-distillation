@@ -27,6 +27,20 @@ from model_utils import (
 logger = logging.getLogger(__name__)
 
 
+class SoftmaxLinearLayer(nn.Module):
+    def __init__(self, d_t, d_s):
+        super(SoftmaxLinearLayer, self).__init__()
+        # Linear layer without bias
+        self.weight = nn.Parameter(torch.randn(d_s, d_t))
+
+    def forward(self, x):
+        # Apply softmax to the weight matrix along the d_t dimension
+        softmax_weights = torch.softmax(self.weight, dim=1)
+        # Multiply the softmax-weighted matrix with the input tensor x
+        # x is expected to have shape (B, d_t)
+        return torch.matmul(x, softmax_weights.T)  # Shape will be (B, d_s)
+
+
 class PrefixEncoder(nn.Module):
     """Module that returns key-value pairs for prefix tokens."""
 
@@ -527,6 +541,14 @@ class PatchedModel(nn.Module, PyTorchModelHubMixin):
             assert self.teacher_kv_dim == self.student_kv_dim
             self.embedding_proj = None
             self.patch_encoder = None
+        elif embedding_transform_strategy == "select_channel_linear_softmax":
+            assert self.teacher_num_layers == self.student_num_layers, f"depth mismatch, {self.teacher_num_layers} != {self.student_num_layers}"
+            self.embedding_proj = self.embedding_proj = nn.ModuleList(
+                [
+                    SoftmaxLinearLayer(self.teacher_kv_dim, self.student_kv_dim) for _ in range(self.student_num_layers)
+                ]
+            )
+            self.patch_encoder = None
         elif embedding_transform_strategy in ["layerwise_pool_and_project", "layerwise_last_and_project"]:
             self.embedding_proj = nn.ModuleList(
                 [
@@ -759,6 +781,26 @@ class PatchedModel(nn.Module, PyTorchModelHubMixin):
             teacher_kv = outputs["past_key_values"]
             embeddings = torch.stack(tuple(rearrange_kv_tuple(teacher_kv[l], extract_last_n, attention_mask, self.patch_len) for l in extract_layers), dim=0).to(self.student_dtype)
             assert (self.student_num_layers, 2, bsz, self.patch_len, self.teacher_kv_dim) == embeddings.shape
+
+            # [num_layers * 2, bsz, patch_len, teacher_dim]
+            embeddings = rearrange(embeddings, 'l kv ... -> (l kv) ...')
+            # [bsz, seq_len, num_layers * 2, teacher_dim]
+            embeddings = rearrange(embeddings, 'l b p d -> b p l d')
+
+        elif self.embedding_transform_strategy == "select_channel_linear_softmax":
+            bsz = attention_mask.shape[0]
+            # patch len is the length of longest sequence
+            self.patch_len = outputs.logits.shape[1]
+
+            # tuple of length num_layers, each with tuple of length 2
+            # each with tensor of shape [batch_size, num_heads, seq_len, teacher_dim // num_heads]
+            teacher_kv = outputs["past_key_values"]
+            embeddings = tuple(rearrange_kv_tuple(teacher_kv[i], extract_last_n, attention_mask, self.patch_len) for i in range(self.teacher_num_layers))
+
+            # apply self.embedding_proj to each layer
+            embeddings = tuple(proj(embed) for embed, proj in zip(embeddings, self.embedding_proj))
+            embeddings = torch.stack(embeddings, dim=0).to(self.student_dtype)
+            assert (self.teacher_num_layers, 2, bsz, self.patch_len, self.teacher_kv_dim) == embeddings.shape
 
             # [num_layers * 2, bsz, patch_len, teacher_dim]
             embeddings = rearrange(embeddings, 'l kv ... -> (l kv) ...')
@@ -1116,7 +1158,7 @@ class PatchedModel(nn.Module, PyTorchModelHubMixin):
         if "desc" in self.embedding_transform_strategy:
             # variable kv length, use teacher attention mask
             prefix_attention_mask = tr_attention_mask
-        elif self.embedding_transform_strategy == "select_layer_all":
+        elif self.embedding_transform_strategy in ["select_layer_all", "select_channel_linear_softmax"]:
             prefix_attention_mask = tr_attention_mask
         else:
             prefix_attention_mask = self.get_patch_attention_mask(batch_size=input_ids.shape[0])

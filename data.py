@@ -1,12 +1,14 @@
 import torch
 import numpy as np
 import warnings
+import logging
 from typing import Any, Dict, List, Optional, Union
 
 from transformers import PreTrainedTokenizerBase
 from transformers.data.data_collator import DataCollatorMixin
 from alignment import apply_chat_template
 
+logger = logging.getLogger(__name__)
 
 def _torch_collate_batch(examples, tokenizer, pad_value: Optional[int] = None, pad_to_multiple_of: Optional[int] = None):
     """Collate `examples` into a batch, using the information in `tokenizer` for padding if necessary."""
@@ -260,6 +262,7 @@ def process_raw_datasets(raw_datasets, tokenizer, preprocessing_num_workers, pre
     #####################
     # remove rows without "assistant" in the label field
     #####################
+    logger.info("Removing rows without 'assistant' in the label field")
     def exists_assistant(example):
         for messages in example["messages"]:
             if messages["role"] == "assistant":
@@ -277,6 +280,7 @@ def process_raw_datasets(raw_datasets, tokenizer, preprocessing_num_workers, pre
     # <|assistant|>
     # {assistant_prompt}<|end_of_text|>
     # everything is in the text field
+    logger.info("Applying chat template")
     raw_datasets = raw_datasets.map(
         apply_chat_template,
         fn_kwargs={
@@ -292,8 +296,12 @@ def process_raw_datasets(raw_datasets, tokenizer, preprocessing_num_workers, pre
     #####################
     # remove long examples
     #####################
+    logger.info("Removing long examples")
     def check_overflows(example, tokenizer, max_seq_length):
         if len(tokenizer.encode(example["text"])) > max_seq_length:
+            warnings.warn(
+                f"Example {example} has been discarded as the number of tokens exceeds the maximum sequence length."
+            )
             return False
         else:
             return True

@@ -165,9 +165,10 @@ def main():
     model_config_sanity_check(teacher_model.config)
     model_config_sanity_check(student_model.config)
 
-    training_args.embeddings_from_layer_n = list(map(int, training_args.embeddings_from_layer_n.split(",")))
+    if training_args.embeddings_from_layer_n is not None:
+        training_args.embeddings_from_layer_n = list(map(int, training_args.embeddings_from_layer_n.split(",")))
     # HACK for debugging with small models, drop last 11 layers from the student model
-    if training_args.debug_mode:
+    if training_args.debug_mode and training_args.embedding_transform_strategy == "select_layers_all":
         student_model.model.layers = student_model.model.layers[:len(training_args.embeddings_from_layer_n)]
         student_model.config.n_layer = len(training_args.embeddings_from_layer_n)
 
