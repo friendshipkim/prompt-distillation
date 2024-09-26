@@ -209,6 +209,7 @@ def main():
         peft_config=get_peft_config(model_args),
         dataset_kwargs=training_args.dataset_kwargs,
         data_collator=collator,
+        dataset_num_proc=data_args.preprocessing_num_workers,
     )
 
     ###############

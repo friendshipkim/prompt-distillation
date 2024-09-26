@@ -43,12 +43,18 @@ from alignment import (
 from trl import SFTTrainer, setup_chat_format
 from data import DataCollatorForCompletionOnlyLM, process_raw_datasets
 from train_configs import SFTDistillConfig
+import torch.distributed as dist
+from datetime import timedelta
 
 
 logger = logging.getLogger(__name__)
+# torch.cuda.set_device(4)
 
 
 def main():
+
+    dist.init_process_group(backend='nccl', timeout=timedelta(seconds=360000))
+
     parser = H4ArgumentParser((ModelArguments, DataArguments, SFTDistillConfig))
     model_args, data_args, training_args = parser.parse()
 
@@ -163,6 +169,7 @@ def main():
         peft_config=get_peft_config(model_args),
         dataset_kwargs=training_args.dataset_kwargs,
         data_collator=collator,
+        dataset_num_proc=data_args.preprocessing_num_workers,
     )
 
     ###############
