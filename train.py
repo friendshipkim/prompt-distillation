@@ -194,7 +194,8 @@ def main():
     # response_template = "\n<|assistant|>\n"
     # collator = DataCollatorForCompletionOnlyLM(response_template, tokenizer=tokenizer)
     # ours
-    response_template = "\n<|assistant|>\n"
+    # response_template = "\n<|assistant|>\n"
+    response_template = [198, 27, 91, 78191, 91]
     collator = CustomDataCollatorForCompletionOnlyLM(tokenizer, response_template, teacher_ratio=0.5)
     trainer = SFTTrainer(
         model=model,
@@ -209,6 +210,7 @@ def main():
         peft_config=get_peft_config(model_args),
         dataset_kwargs=training_args.dataset_kwargs,
         data_collator=collator,
+        dataset_num_proc=data_args.preprocessing_num_workers,
     )
 
     ###############

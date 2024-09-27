@@ -299,9 +299,9 @@ def process_raw_datasets(raw_datasets, tokenizer, preprocessing_num_workers, pre
     logger.info("Removing long examples")
     def check_overflows(example, tokenizer, max_seq_length):
         if len(tokenizer.encode(example["text"])) > max_seq_length:
-            warnings.warn(
-                f"Example {example} has been discarded as the number of tokens exceeds the maximum sequence length."
-            )
+            # warnings.warn(
+            #     f"Example {example} has been discarded as the number of tokens exceeds the maximum sequence length."
+            # )
             return False
         else:
             return True
