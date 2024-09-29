@@ -46,10 +46,7 @@ from train_configs import SFTDistillConfig
 import torch.distributed as dist
 from datetime import timedelta
 
-
 logger = logging.getLogger(__name__)
-# torch.cuda.set_device(4)
-
 
 def main():
 
@@ -154,7 +151,8 @@ def main():
     # Initialize the Trainer
     ########################
     # for baseline
-    response_template = "\n<|assistant|>\n"
+    # response_template = "\n<|assistant|>\n"
+    response_template = [198, 27, 91, 78191, 91]
     collator = DataCollatorForCompletionOnlyLM(tokenizer, response_template)
     trainer = SFTTrainer(
         model=model,

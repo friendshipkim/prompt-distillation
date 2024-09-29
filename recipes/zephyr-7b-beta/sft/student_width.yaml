@@ -1,5 +1,5 @@
 # Model arguments
-model_name_or_path: nvidia/Llama-3.1-Minitron-4B-Depth-Base
+model_name_or_path: nvidia/Llama-3.1-Minitron-4B-Width-Base
 model_revision: main
 torch_dtype: bfloat16
 attn_implementation: flash_attention_2
@@ -7,7 +7,7 @@ attn_implementation: flash_attention_2
 # Data training arguments
 chat_template: "{% for message in messages %}\n{% if message['role'] == 'user' %}\n{{ '<|user|>\n' + message['content'] + eos_token }}\n{% elif message['role'] == 'system' %}\n{{ '<|system|>\n' + message['content'] + eos_token }}\n{% elif message['role'] == 'assistant' %}\n{{ '<|assistant|>\n'  + message['content'] + eos_token }}\n{% endif %}\n{% if loop.last and add_generation_prompt %}\n{{ '<|assistant|>' }}\n{% endif %}\n{% endfor %}"
 dataset_mixer:
-  JunxiongWang/testdataset: 1.0
+  JunxiongWang/sftdataset: 1.0
 dataset_splits:
 - train
 - test
@@ -17,7 +17,7 @@ preprocessing_num_workers: 12
 bf16: true
 do_eval: true
 evaluation_strategy: epoch
-gradient_accumulation_steps: 1
+gradient_accumulation_steps: 2
 gradient_checkpointing: true
 gradient_checkpointing_kwargs:
   use_reentrant: False
@@ -27,13 +27,13 @@ logging_steps: 10
 logging_strategy: steps
 lr_scheduler_type: cosine
 max_seq_length: 8192
-pre_filter_max_seq_length: 8000
+pre_filter_max_seq_length: 7000
 max_steps: -1
 num_train_epochs: 1
-output_dir: prompt_distill_student
+output_dir: /local1/junxiong/student_width
 overwrite_output_dir: true
-per_device_eval_batch_size: 8
-per_device_train_batch_size: 8
+per_device_eval_batch_size: 4
+per_device_train_batch_size: 4
 push_to_hub: false
 remove_unused_columns: true
 report_to:
