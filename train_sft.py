@@ -46,10 +46,7 @@ from train_configs import SFTDistillConfig
 import torch.distributed as dist
 from datetime import timedelta
 
-
 logger = logging.getLogger(__name__)
-# torch.cuda.set_device(4)
-
 
 def main():
 
