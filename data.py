@@ -164,7 +164,7 @@ class CustomDataCollatorForCompletionOnlyLM(DataCollatorMixin):
         tokenizer: PreTrainedTokenizerBase,
         response_template: Union[str, List[int]],
         ignore_index: int = -100,
-        teacher_ratio: float = 0.5,
+        teacher_ratio: float = 1.0,
         return_tensors: str = "pt"
     ):
         self.tokenizer = tokenizer
@@ -240,7 +240,8 @@ class CustomDataCollatorForCompletionOnlyLM(DataCollatorMixin):
         # print(self.tokenizer.decode(input_ids[:response_token_ids_end_idx]))
 
         # === split input_ids into teacher and student
-        teacher_input_len = int(response_token_ids_end_idx * self.teacher_ratio)
+        # teacher input doesn't include <|assistant|> and after
+        teacher_input_len = int(response_token_ids_start_idx * self.teacher_ratio)
         teacher_input_ids, student_input_ids = input_ids[:teacher_input_len], input_ids[teacher_input_len:]
         teacher_attention_mask, student_attention_mask = attention_mask[:teacher_input_len], attention_mask[teacher_input_len:]
 
@@ -299,9 +300,9 @@ def process_raw_datasets(raw_datasets, tokenizer, preprocessing_num_workers, pre
     logger.info("Removing long examples")
     def check_overflows(example, tokenizer, max_seq_length):
         if len(tokenizer.encode(example["text"])) > max_seq_length:
-            warnings.warn(
-                f"Example {example} has been discarded as the number of tokens exceeds the maximum sequence length."
-            )
+            # warnings.warn(
+            #     f"Example {example} has been discarded as the number of tokens exceeds the maximum sequence length."
+            # )
             return False
         else:
             return True

@@ -1194,6 +1194,10 @@ class PatchedModel(nn.Module, PyTorchModelHubMixin):
         # print(f"teacher_input_ids: {teacher_input_ids.shape}")
         # print(f"input_ids: {input_ids.shape}")
 
+        # print(self.teacher_tokenizer.batch_decode(teacher_input_ids))
+        # print(self.student_tokenizer.batch_decode(input_ids))
+        # print(self.student_tokenizer.decode(labels[0][labels[0] > 0]))
+        # breakpoint()
         past_key_values = self.embed_and_project(
             teacher_input_ids=teacher_input_ids,
             teacher_attention_mask=teacher_attention_mask,

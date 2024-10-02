@@ -154,7 +154,8 @@ def main():
     # Initialize the Trainer
     ########################
     # for baseline
-    response_template = "\n<|assistant|>\n"
+    # response_template = "\n<|assistant|>\n"
+    response_template = [27, 91, 78191, 91, 397]
     collator = DataCollatorForCompletionOnlyLM(tokenizer, response_template)
     trainer = SFTTrainer(
         model=model,

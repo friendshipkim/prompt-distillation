@@ -194,8 +194,13 @@ def main():
     # response_template = "\n<|assistant|>\n"
     # collator = DataCollatorForCompletionOnlyLM(response_template, tokenizer=tokenizer)
     # ours
-    response_template = "\n<|assistant|>\n"
-    collator = CustomDataCollatorForCompletionOnlyLM(tokenizer, response_template, teacher_ratio=0.5)
+    # response_template = "\n<|assistant|>\n"
+    response_template = [27, 91, 78191, 91, 397]
+    collator = CustomDataCollatorForCompletionOnlyLM(
+        tokenizer,
+        response_template,
+        teacher_ratio=training_args.teacher_input_ratio,
+    )
     trainer = SFTTrainer(
         model=model,
         # model_init_kwargs=model_kwargs,

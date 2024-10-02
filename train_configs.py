@@ -43,3 +43,7 @@ class SFTDistillConfig(SFTConfig):
         default=8000,
         metadata={"help": "max sequence length for filtering long sequences before training"},
     )
+    teacher_input_ratio: Optional[float] = field(
+        default=1.0,
+        metadata={"help": "ratio of teacher input in the training data"},
+    )
