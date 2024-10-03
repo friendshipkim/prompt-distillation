@@ -443,6 +443,7 @@ class PatchedModel(nn.Module, PyTorchModelHubMixin):
         freeze_gate: bool = False,
         mlp: bool = False,
         offset_pos_id: bool = False,
+        channel_mapping_path: str = None,
     ):
         super().__init__()
         self.teacher = teacher
@@ -541,6 +542,18 @@ class PatchedModel(nn.Module, PyTorchModelHubMixin):
             assert self.teacher_kv_dim == self.student_kv_dim
             self.embedding_proj = None
             self.patch_encoder = None
+        elif embedding_transform_strategy == "select_channel_identity":
+            # identity mapping
+            assert self.teacher_kv_dim == self.student_kv_dim
+            assert self.teacher_num_layers == self.student_num_layers, f"depth mismatch, {self.teacher_num_layers} != {self.student_num_layers}"
+            self.embedding_proj = None
+            self.patch_encoder = None
+        elif embedding_transform_strategy == "select_channel":
+            assert self.teacher_num_layers == self.student_num_layers, f"depth mismatch, {self.teacher_num_layers} != {self.student_num_layers}"
+            assert channel_mapping_path is not None, "channel mapping path is required"
+            self.embedding_proj = None
+            self.patch_encoder = None
+            self.channel_mapping = torch.load(channel_mapping_path)
         elif embedding_transform_strategy == "select_channel_linear_softmax":
             assert self.teacher_num_layers == self.student_num_layers, f"depth mismatch, {self.teacher_num_layers} != {self.student_num_layers}"
             self.embedding_proj = self.embedding_proj = nn.ModuleList(
@@ -781,6 +794,21 @@ class PatchedModel(nn.Module, PyTorchModelHubMixin):
             teacher_kv = outputs["past_key_values"]
             embeddings = torch.stack(tuple(rearrange_kv_tuple(teacher_kv[l], extract_last_n, attention_mask, self.patch_len) for l in extract_layers), dim=0).to(self.student_dtype)
             assert (self.student_num_layers, 2, bsz, self.patch_len, self.teacher_kv_dim) == embeddings.shape
+
+            # [num_layers * 2, bsz, patch_len, teacher_dim]
+            embeddings = rearrange(embeddings, 'l kv ... -> (l kv) ...')
+            # [bsz, seq_len, num_layers * 2, teacher_dim]
+            embeddings = rearrange(embeddings, 'l b p d -> b p l d')
+
+        elif self.embedding_transform_strategy == "select_channel_identity":
+            bsz = attention_mask.shape[0]
+            # patch len is the length of longest sequence
+            self.patch_len = outputs.logits.shape[1]
+
+            # tuple of length num_layers, each with tuple of length 2
+            # each with tensor of shape [batch_size, num_heads, seq_len, teacher_dim // num_heads]
+            teacher_kv = outputs["past_key_values"]
+            embeddings = torch.stack(tuple(rearrange_kv_tuple(teacher_kv[i], extract_last_n, attention_mask, self.patch_len) for i in range(self.teacher_num_layers)), dim=0).to(self.student_dtype)
 
             # [num_layers * 2, bsz, patch_len, teacher_dim]
             embeddings = rearrange(embeddings, 'l kv ... -> (l kv) ...')
@@ -1158,7 +1186,7 @@ class PatchedModel(nn.Module, PyTorchModelHubMixin):
         if "desc" in self.embedding_transform_strategy:
             # variable kv length, use teacher attention mask
             prefix_attention_mask = tr_attention_mask
-        elif self.embedding_transform_strategy in ["select_layer_all", "select_channel_linear_softmax"]:
+        elif self.embedding_transform_strategy in ["select_layer_all", "select_channel_identity", "select_channel_linear_softmax"]:
             prefix_attention_mask = tr_attention_mask
         else:
             prefix_attention_mask = self.get_patch_attention_mask(batch_size=input_ids.shape[0])

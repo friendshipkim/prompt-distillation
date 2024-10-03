@@ -47,3 +47,7 @@ class SFTDistillConfig(SFTConfig):
         default=1.0,
         metadata={"help": "ratio of teacher input in the training data"},
     )
+    channel_mapping_path: Optional[str] = field(
+        default=None,
+        metadata={"help": "Path to the channel mapping file for width pruning"},
+    )

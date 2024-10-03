@@ -31,6 +31,8 @@ EMBEDDING_TRANSFORM_STRATEGIES = [
     "last_and_project",
     "pool_and_project",
     "select_layer_all",
+    "select_channel",
+    "select_channel_identity",
     "select_channel_linear_softmax",
     "layerwise_pool_and_project",
     "layerwise_pool_and_share_project",

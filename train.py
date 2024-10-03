@@ -180,6 +180,7 @@ def main():
         patch_len=training_args.patch_len,
         embedding_transform_strategy=training_args.embedding_transform_strategy,
         embeddings_from_layer_n=training_args.embeddings_from_layer_n,
+        channel_mapping_path=training_args.channel_mapping_path,
     )
 
     print("model:", model)

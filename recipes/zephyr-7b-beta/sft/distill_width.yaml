@@ -45,4 +45,4 @@ save_total_limit: 1
 seed: 42
 warmup_ratio: 0.01
 teacher_input_ratio: 1.0
-embedding_transform_strategy: select_channel_linear_softmax
+embedding_transform_strategy: "select_channel_identity"
